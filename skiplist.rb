@@ -15,69 +15,111 @@ class SkipListNode
   def set_next_node_at_level(l, node)
     @levels[l] = node
   end
+
+  def next
+    @levels[0]
+  end
+
+  def inspect
+    "#{@key} #{@value}"
+  end
 end
 
 class SkipList
-  def initialize(max_level = 5)
+  attr_reader :size
+  def initialize(max_level = 16)
     @max_level = max_level
+    @current_highest_level = 1
     @head = SkipListNode.new(nil, nil, @max_level)
     @tail = nil
-    @max_level.times { |l| @head.set_next_node_at_level(l, @tail) }
+    @max_level.times { |l| @head.set_next_node_at_level(l, nil) }
+    @size = 0
   end
 
   def insert(key, value)
     level = random_level
+    # 更新当前最高层数
+    @current_highest_level = level if level > @current_highest_level 
+
     new_node = SkipListNode.new(key, value, level)
-    level.times do |l|
-      current = @head
+    current = @head
+    # 从高向低插入
+    (level - 1).downto(0) do |l|
+      # 找到应该插入的前驱位置
       while current.next_node_at_level(l) && current.next_node_at_level(l).key < key
         current = current.next_node_at_level(l)
       end
+      # key值唯一
+      raise "Key must be unique" if current.next_node_at_level(l) && current.next_node_at_level(l).key == key
+      # 链表插入
       new_node.set_next_node_at_level(l, current.next_node_at_level(l))
       current.set_next_node_at_level(l, new_node)
     end
-    true
+
+    # 如果新节点的key比当前尾节点大，则将尾节点指向新节点
+    @tail = new_node if @tail.nil? || new_node.key > @tail.key
+
+    @size += 1
   end
 
   def delete(key)
-    # found, node = lookup(key)
-    # return false unless found
-    @max_level.times do |l|
-      current = @head
+    deleted = false
+    current = @head
+    # 逐层删除
+    (@current_highest_level - 1).downto(0) do |l|
+      # 找到待删节点的前驱
       while current.next_node_at_level(l) && current.next_node_at_level(l).key < key
         current = current.next_node_at_level(l)
       end
 
       node = current.next_node_at_level(l)
       if node && node.key == key
+        deleted = true
         current.set_next_node_at_level(l, node.next_node_at_level(l))
       end
     end
+    # 如果删除的是尾节点，则需要更新尾节点
+    @tail = current if key == @tail.key
+    if deleted
+      @size -= 1 
+      # 如果删除的节点是当前最高层中的唯一节点，即当前最高层为空，则层高递减
+      while @head.next_node_at_level(@current_highest_level).nil?
+        @current_highest_level -= 1
+      end
+    end
+
+    deleted
   end
 
   def lookup(key)
-    current_level = @max_level - 1
-    while  current_level >= 0
-      floor = find_floor_in_level(current_level, key)
-      return [true, floor] if floor.key == key
-      current_level -= 1
+    current = @head
+    (@current_highest_level - 1).downto(0) do |current_level|
+      while current.next_node_at_level(current_level) && current.next_node_at_level(current_level).key <= key
+        current = current.next_node_at_level(current_level)
+      end
+      return [true, current] if current.key == key
     end
-    return [false, floor]
+    return [false, current]
   end
 
   def floor_node(key)
     lookup(key)[1]
   end
 
-  private
-  def find_floor_in_level(level, key, &block)
-    current = @head
-    while (next_node = current.next_node_at_level(level)) && next_node.key <= key
-      current = next_node
-    end
-    block ? block.call(current) : current
+  def ceil_node(key)
+    found, node = lookup(key)
+    found ? node : node.next
   end
 
+  def first
+    @head.next
+  end
+
+  def last
+    @tail
+  end
+
+  private
   def random_level
     # level值越高，其概率越小
     level = 1
@@ -85,26 +127,5 @@ class SkipList
       level += 1
     end
     level = @max_level > level ? level : @max_level
-  end
-end
-
-class TestSkipList < Minitest::Test
-  def setup
-    @skip_list = SkipList.new
-    [0, 3].each { |s| (s..100).step(5) { |i| @skip_list.insert(i, i.to_s) } }
-  end
-
-  def test_lookup
-    assert_equal "20", @skip_list.lookup(20)[1].value
-    assert_equal false, @skip_list.lookup(44)[0]
-    assert_equal "53", @skip_list.floor_node(54).value
-    assert_equal nil, @skip_list.floor_node(-1).value
-  end
-
-  def test_delete
-    @skip_list.delete(70)
-    assert_equal "68", @skip_list.floor_node(70).value
-    @skip_list.delete(68)
-    assert_equal "65", @skip_list.floor_node(70).value
   end
 end
